@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNN - Reconocimiento de Dígitos</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 600px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .section {
+            padding: 20px;
+            border: 2px solid #f0f0f0;
+            border-radius: 15px;
+            background: #f9f9f9;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .canvas-container {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            cursor: crosshair;
+            background: white;
+            display: block;
+            width: 100%;
+            max-width: 250px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-direction: column;
+        }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .file-input-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        #preview {
+            margin-top: 15px;
+            max-width: 100%;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .result-section {
+            grid-column: 1 / -1;
+            padding: 30px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            border: 2px solid #667eea;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .digit-result {
+            font-size: 4em;
+            font-weight: bold;
+            color: #667eea;
+            margin: 20px 0;
+            text-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .confidence {
+            font-size: 1.2em;
+            color: #666;
+            margin: 15px 0;
+        }
+
+        .confidence-bar {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 8px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease-out;
+        }
+
+        .probabilities {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .probabilities {
+                grid-template-columns: repeat(5, 1fr);
+                gap: 8px;
+            }
+        }
+
+        .prob-item {
+            padding: 15px 10px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #f0f0f0;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .prob-item.top-pred {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .prob-digit {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .prob-value {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+            border-left: 4px solid #c62828;
+        }
+
+        .error.active {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .tab-button {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: #666;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Reconocimiento de Dígitos</h1>
+        <p class="subtitle">Red Neuronal Convolucional (CNN) - MNIST</p>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab('upload')">📤 Subir Imagen</button>
+            <button class="tab-button" onclick="switchTab('draw')">✏️ Dibujar</button>
+        </div>
+
+        <div class="content">
+            <!-- Sección de Subida de Imagen -->
+            <div class="tab-content active" id="upload-tab">
+                <div class="section">
+                    <h2>📤 Subir Imagen</h2>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="imageInput" accept="image/*">
+                        <label for="imageInput" class="file-input-label">Seleccionar Imagen</label>
+                    </div>
+                    <img id="preview" alt="Vista previa">
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="predictFromUpload()">🔮 Predecir</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección de Dibujo -->
+            <div class="tab-content" id="draw-tab">
+                <div class="section">
+                    <h2>✏️ Dibuja un Dígito</h2>
+                    <div class="canvas-container">
+                        <canvas id="drawingCanvas" width="250" height="250"></canvas>
+                    </div>
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="predictFromDrawing()">🔮 Predecir</button>
+                        <button class="btn-secondary" onclick="clearCanvas()">🗑️ Limpiar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección de Resultados -->
+            <div class="result-section" id="resultSection">
+                <h2>📊 Predicción</h2>
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Procesando imagen...</p>
+                </div>
+                <div class="digit-result" id="digitResult"></div>
+                <div class="confidence" id="confidenceText"></div>
+                <div class="confidence-bar">
+                    <div class="confidence-fill" id="confidenceFill"></div>
+                </div>
+                <p style="color: #666; margin-top: 20px; font-weight: 600;">Probabilidades por Dígito:</p>
+                <div class="probabilities" id="probabilities"></div>
+            </div>
+        </div>
+
+        <div class="error" id="errorMsg"></div>
+    </div>
+
+    <script>
+        // Canvas para dibujar
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+
+        // Inicializar canvas con fondo blanco
+        function initCanvas() {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Event listeners para dibujo
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        // Touch events para dispositivos móviles
+        canvas.addEventListener('touchstart', handleTouch);
+        canvas.addEventListener('touchmove', handleTouch);
+        canvas.addEventListener('touchend', stopDrawing);
+
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+        }
+
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent(e.type === 'touchstart' ? 'mousedown' : 'mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            canvas.dispatchEvent(mouseEvent);
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+            ctx.closePath();
+        }
+
+        function clearCanvas() {
+            initCanvas();
+        }
+
+        function switchTab(tab) {
+            // Ocultar todos los tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+
+            // Mostrar el tab seleccionado
+            document.getElementById(tab + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Manejo de archivo subido
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    document.getElementById('preview').src = event.target.result;
+                    document.getElementById('preview').style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Función para hacer predicción desde imagen subida
+        async function predictFromUpload() {
+            const file = document.getElementById('imageInput').files[0];
+            if (!file) {
+                showError('Por favor, selecciona una imagen primero');
+                return;
+            }
+            await predict(file);
+        }
+
+        // Función para hacer predicción desde dibujo
+        async function predictFromDrawing() {
+            canvas.toBlob(blob => {
+                const file = new File([blob], 'drawing.png', { type: 'image/png' });
+                predict(file);
+            });
+        }
+
+        // Función principal de predicción
+        async function predict(file) {
+            const formData = new FormData();
+            formData.append('image', file);
+
+            // Mostrar loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultSection').classList.add('active');
+            document.getElementById('errorMsg').classList.remove('active');
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Error en la predicción');
+                }
+
+                const data = await response.json();
+                document.getElementById('loading').style.display = 'none';
+
+                // Mostrar resultados
+                displayResults(data);
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showError(error.message);
+            }
+        }
+
+        // Mostrar resultados
+        function displayResults(data) {
+            // Mostrar dígito predicho
+            document.getElementById('digitResult').textContent = data.digit;
+
+            // Mostrar confianza
+            const confidence = data.confidence;
+            document.getElementById('confidenceText').textContent = 
+                `Confianza: ${confidence.toFixed(2)}%`;
+            document.getElementById('confidenceFill').style.width = confidence + '%';
+
+            // Mostrar probabilidades
+            const probabilitiesDiv = document.getElementById('probabilities');
+            probabilitiesDiv.innerHTML = '';
+
+            for (let i = 0; i < 10; i++) {
+                const prob = data.probabilities[i];
+                const isTopPred = i === data.digit;
+                const div = document.createElement('div');
+                div.className = 'prob-item' + (isTopPred ? ' top-pred' : '');
+                div.innerHTML = `
+                    <div class="prob-digit">${i}</div>
+                    <div class="prob-value">${prob.toFixed(1)}%</div>
+                `;
+                probabilitiesDiv.appendChild(div);
+            }
+        }
+
+        // Mostrar error
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMsg');
+            errorDiv.textContent = '❌ Error: ' + message;
+            errorDiv.classList.add('active');
+            document.getElementById('resultSection').classList.remove('active');
+        }
+
+        // Inicializar canvas al cargar
+        window.addEventListener('load', function() {
+            initCanvas();
+            checkModelHealth();
+        });
+
+        // Verificar que el modelo esté cargado
+        async function checkModelHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                if (!data.model_loaded) {
+                    showError('El modelo no se pudo cargar. Verifica que el archivo .keras exista.');
+                }
+            } catch (error) {
+                console.error('Error verificando servidor:', error);
+            }
+        }
+    </script>
+</body>
+</html>
