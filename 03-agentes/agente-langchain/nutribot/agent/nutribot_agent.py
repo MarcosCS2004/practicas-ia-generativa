@@ -1,51 +1,73 @@
 """
-NutriBot Agent - Agente nutricional con LangChain
-Arquitectura: Agente → Tools (IMC, calorías, registro) + END
+NutriBot Agent - Agente nutricional con LangGraph
+Arquitectura: StateGraph -> LLM -> Conditional Edge (Tools / END)
 """
 
-from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+import os
+from typing import Annotated, TypedDict, Union, List
+
 from langchain_openai import AzureChatOpenAI
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+from langgraph.graph.message import add_messages
+
 from tools.nutrition_tools import calcular_imc, buscar_calorias, registrar_comida
-import os
 
-def create_nutribot_agent(llm=None):
-    """Crea y devuelve el agente NutriBot."""
+# ---------------------------------------------------------------------------
+# Definición del Estado
+# ---------------------------------------------------------------------------
 
-    if llm is None:
-        deployment_name = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", "gpt-4o-mini")
-        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-        api_version = os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
-        
-        if api_key:
-            llm = AzureChatOpenAI(
-                api_key=api_key,
-                azure_endpoint=endpoint,
-                azure_deployment=deployment_name,
-                api_version=api_version,
-                temperature=0
-            )
-        else:
-            # Proveedor de tokens para autenticación basada en identidad (Azure Foundry / Managed Identity)
-            token_provider = get_bearer_token_provider(
-                DefaultAzureCredential(), 
-                "https://ai.azure.com/.default"
-            )
-            
-            llm = AzureChatOpenAI(
-                azure_ad_token_provider=token_provider,
-                azure_endpoint=endpoint,
-                azure_deployment=deployment_name,
-                api_version=api_version,
-                temperature=0
-            )
+class AgentState(TypedDict):
+    """El estado del agente, que incluye el historial de mensajes."""
+    messages: Annotated[List[BaseMessage], add_messages]
 
-    tools = [calcular_imc, buscar_calorias, registrar_comida]
+# ---------------------------------------------------------------------------
+# Configuración de herramientas y LLM
+# ---------------------------------------------------------------------------
 
+tools = [calcular_imc, buscar_calorias, registrar_comida]
+tool_node = ToolNode(tools)
+
+def get_llm():
+    deployment_name = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME", "gpt-4o-mini")
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+    api_version = os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+    
+    if api_key:
+        llm = AzureChatOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            azure_deployment=deployment_name,
+            api_version=api_version,
+            temperature=0
+        )
+    else:
+        token_provider = get_bearer_token_provider(
+            DefaultAzureCredential(), 
+            "https://ai.azure.com/.default"
+        )
+        llm = AzureChatOpenAI(
+            azure_ad_token_provider=token_provider,
+            azure_endpoint=endpoint,
+            azure_deployment=deployment_name,
+            api_version=api_version,
+            temperature=0
+        )
+    return llm.bind_tools(tools)
+
+# ---------------------------------------------------------------------------
+# Nodos del Grafo
+# ---------------------------------------------------------------------------
+
+def call_model(state: AgentState):
+    """Llamada al modelo LLM."""
+    messages = state['messages']
+    
     system_prompt = """Eres NutriBot, un asistente nutricional experto y amigable. 
 Ayudas a los usuarios con:
 
@@ -61,62 +83,92 @@ despídete amablemente y di que puede volver cuando quiera.
 
 Nunca inventes información nutricional; si no sabes algo, usa buscar_calorias o dilo honestamente."""
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
+    # Insertar system prompt si no está ya
+    if not any(isinstance(m, SystemMessage) for m in messages):
+        messages = [SystemMessage(content=system_prompt)] + messages
+    
+    llm = get_llm()
+    response = llm.invoke(messages)
+    return {"messages": [response]}
 
-    agent = create_openai_tools_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        handle_parsing_errors=True,
-        max_iterations=5,
+def should_continue(state: AgentState):
+    """Determina si continuar con las herramientas o terminar."""
+    messages = state['messages']
+    last_message = messages[-1]
+    
+    if last_message.tool_calls:
+        return "tools"
+    return END
+
+# ---------------------------------------------------------------------------
+# Construcción del Grafo
+# ---------------------------------------------------------------------------
+
+def create_nutribot_agent():
+    """Crea y compila el grafo de LangGraph."""
+    workflow = StateGraph(AgentState)
+
+    # Definir nodos
+    workflow.add_node("agent", call_model)
+    workflow.add_node("tools", tool_node)
+
+    # Definir entrada
+    workflow.set_entry_point("agent")
+
+    # Definir bordes condicionales
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
     )
 
-    return agent_executor
+    # Borde de herramientas de vuelta al agente
+    workflow.add_edge("tools", "agent")
 
+    return workflow.compile()
+
+# ---------------------------------------------------------------------------
+# Funciones de ejecución (compatibles con app.py)
+# ---------------------------------------------------------------------------
 
 def detect_end_intent(message: str) -> bool:
     """Detecta si el usuario quiere terminar la conversación."""
     end_keywords = ["adios", "adiós", "salir", "fin", "terminar", "bye", "exit", "hasta luego", "chao"]
     return any(kw in message.lower() for kw in end_keywords)
 
-
-def run_agent(agent_executor, user_input: str, chat_history: list) -> dict:
+def run_agent(compiled_graph, user_input: str, chat_history: list) -> dict:
     """
-    Ejecuta el agente y devuelve la respuesta.
-    
-    Returns:
-        dict con 'response' (str), 'end_conversation' (bool), 'chat_history' (list)
+    Ejecuta el grafo de LangGraph y devuelve la respuesta.
     """
     if detect_end_intent(user_input):
         farewell = "¡Hasta pronto! 👋 Ha sido un placer ayudarte con tu nutrición. ¡Recuerda mantener una alimentación equilibrada!"
         return {
             "response": farewell,
             "end_conversation": True,
-            "chat_history": chat_history,
+            "chat_history": chat_history + [
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": farewell}
+            ],
         }
 
-    # Convertir historial al formato LangChain
-    lc_history = []
+    # Preparar el estado inicial a partir del historial
+    initial_messages = []
     for msg in chat_history:
         if msg["role"] == "user":
-            lc_history.append(HumanMessage(content=msg["content"]))
+            initial_messages.append(HumanMessage(content=msg["content"]))
         else:
-            lc_history.append(AIMessage(content=msg["content"]))
+            initial_messages.append(AIMessage(content=msg["content"]))
+    
+    initial_messages.append(HumanMessage(content=user_input))
+    
+    # Ejecutar el grafo
+    final_state = compiled_graph.invoke({"messages": initial_messages})
+    
+    # Obtener la última respuesta del modelo
+    all_messages = final_state["messages"]
+    last_ai_message = next(m for m in reversed(all_messages) if isinstance(m, AIMessage))
+    response = last_ai_message.content
 
-    result = agent_executor.invoke({
-        "input": user_input,
-        "chat_history": lc_history,
-    })
-
-    response = result.get("output", "Lo siento, no pude procesar tu solicitud.")
-
-    # Actualizar historial
+    # Actualizar historial para el frontend
     updated_history = chat_history + [
         {"role": "user", "content": user_input},
         {"role": "assistant", "content": response},

@@ -11,3 +11,4 @@ azure-identity>=1.16.0
 duckduckgo-search>=6.1.7
 ddgs>=9.14.4
 requests>=2.32.0
+langgraph>=0.0.50
